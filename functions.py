@@ -24,6 +24,10 @@ import pickle
 
 from datetime import datetime
 
+from osgeo import gdal, osr, ogr # Python bindings for GDALa
+
+
+# -----------------------------------------------
 def normalize(values):
     # zero mean, unit variance
     value_mean = values.mean()
@@ -136,107 +140,3 @@ class Geo90Dataset(Dataset):
         
         return {'image': image, 'surface_data': surface, 'frozen': frozen,  'visible_ice': visible_ice} #'material_ice': material_ice}
     
-# def train_resnet(trainloader, testloader, print_epochs = False, loss_fn = torch.nn.BCELoss(), n_channels = 1):
-    
-#     num_classes = 5
-#     model= models.resnet18()
-#     model.conv1 = nn.Conv2d(n_channels, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
-#     model.fc = nn.Linear(in_features=512, out_features=num_classes)
-    
-#     model.to(device)
-    
-#     optimizer = torch.optim.Adam(model.parameters(), weight_decay = L2_param)
-
-#     epoch_loss = np.zeros([train_max_epoch, 2])
-#     for epoch in range(train_max_epoch):  # loop over the dataset multiple times
-
-#         model.train()
-#         running_loss_sum = 0.0
-#         for i, data in enumerate(trainloader, 0): # loop over each sample
-#             # get the inputs; data is a list of [inputs, labels]
-#             image, labels = data['image'].to(device), data['label'].to(device)
-
-#             predicted = model(image)
-            
-            
-# #             print(predicted.squeeze().get_device())
-# #             print('\n')
-# #             print(labels.get_device())
-            
-            
-#             # squeeze: return tensor with all dimensions of size 1 removed
-#             loss = loss_fn(predicted.squeeze(), labels)
-            
-#             optimizer.zero_grad()
-
-#             loss.backward()
-
-#             optimizer.step()
-
-#             running_loss_sum += loss.item()
-
-#         # ----------- get validation loss for current epoch --------------
-#         model.eval()
-#         validation_loss_sum = 0.0
-#         for i, data in enumerate(testloader, 0): # loop over each sample
-
-#             image, labels = data['image'].to(device), data['label'].to(device)
-
-#             predicted = model(image)
-            
-#             loss = loss_fn(predicted.squeeze(), labels)
-
-#             validation_loss_sum += loss.item()
-
-#         # ---------------- print statistics ------------------------
-
-#         running_loss = running_loss_sum / len(trainloader)
-#         validation_loss = validation_loss_sum / len(testloader)
-#         epoch_loss[epoch, :] =  [running_loss, validation_loss]
-        
-#         if print_epochs:
-#             print('epoch %2d: running loss: %.5f, validation loss: %.5f' %
-#                           (epoch + 1, running_loss, validation_loss))
-        
-#         torch.save(model.state_dict(), os.path.join(models_dir, 'epoch-{}.pt'.format(epoch+1)))
-    
-#     if print_epochs:
-#         print('Finished Training')
-        
-#     return epoch_loss
-        
-# def test_resnet(epoch_loss, print_model_epoch = False, n_channels = 1):
-    
-#     # ------ select model ---------
-#     ind = np.argmin(epoch_loss[:, 1])
-    
-#     num_classes=5
-    
-#     model= models.resnet18()
-#     model.conv1 = nn.Conv2d(n_channels, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
-#     model.fc = nn.Linear(in_features=512, out_features=num_classes)
-    
-#     model.load_state_dict(torch.load('{}epoch-{}.pt'.format(models_dir, ind+1)))
-    
-#     model.to(device)
-    
-#     if print_model_epoch:
-#         print("epoch {} model selected".format(ind+1))
-    
-#     # evaluate model on test set
-#     model.eval()
-
-#     with torch.no_grad():
-#         test_results = []
-        
-#         for i, data in enumerate(testloader, 0):
-#             image, labels = data['image'].to(device), data['label'].to(device)
-#             # y_test.append(label.numpy().list())
-#             # print(label.shape)
-#             # print(images.shape)
-
-#             output = model(image)
-            
-#             test_results.extend(output)
-            
-#     return test_results
