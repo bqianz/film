@@ -1,7 +1,24 @@
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 import pandas as pd
 
-def normalize_df(df, cols = ['latitude', 'longitude', 'depth', 'time'], scalerType = StandardScaler, ):
+from pyproj import Transformer
+
+def crop_df_hds(df):
+    ind = df[df['latitude'] > 68.692].index
+    ind = ind.union(df[df['latitude'] <= 68.4881].index)
+    ind = ind.union(df[df['longitude'] < -133.89358284312502].index)
+    ind = ind.union(df[df['longitude'] > -133.443705313125].index)
+    
+    return df.drop(ind)
+    
+def project_df(df):
+    # EPSG:3413
+    # WGS 84 / NSIDC Sea Ice Polar Stereographic North
+    transformer = Transformer.from_crs("epsg:4326", "epsg:3413")
+    df['proj_x'], df['proj_y'] = transformer.transform(df.latitude,df.longitude)
+
+
+def normalize_df(df, cols = ['latitude', 'longitude', 'depth', 'time'], scalerType = StandardScaler):
     """
     Normalized tabular data in specified columns of a dataframe
 
@@ -48,6 +65,7 @@ def normalize_df(df, cols = ['latitude', 'longitude', 'depth', 'time'], scalerTy
     print(f'Latitude ranges from {df.latitude.min()} to {df.latitude.max()}')
     print(f'Longitude ranges from {df.longitude.min()} to {df.longitude.max()}')
     
+    print(f'List of columns normalized: {normalized_columns}')
     return scaler, normalized_columns
 
 def filter_df_visibile_ice(df):
@@ -87,16 +105,16 @@ def filter_df_materials(df):
     df['material_ice'] = dm_materials['Ice']
     print('\'material_ice\' column generated')
 
-def create_chips_geo90(df, fpath, output_path):
-    for for index, row in df.iterrows():
+# def create_chips_geo90(df, fpath, output_path):
+#     for for index, row in df.iterrows():
         
-        lat_index_start = np.round((self.base_lat - lat) / pixel_len - self.chip_size/2).astype(int)
-        lat_index_end = lat_index_start + self.chip_size
+#         lat_index_start = np.round((self.base_lat - lat) / pixel_len - self.chip_size/2).astype(int)
+#         lat_index_end = lat_index_start + self.chip_size
         
-        lng_index_start = np.round((lng - self.base_lng) / pixel_len - self.chip_size/2).astype(int)
-        lng_index_end = lng_index_start + self.chip_size
+#         lng_index_start = np.round((lng - self.base_lng) / pixel_len - self.chip_size/2).astype(int)
+#         lng_index_end = lng_index_start + self.chip_size
         
-        image = self.preloaded[:, lat_index_start:lat_index_end,lng_index_start:lng_index_end]
+#         image = self.preloaded[:, lat_index_start:lat_index_end,lng_index_start:lng_index_end]
         
     
-        save_image(data['image'], os.path.join(data_root, 'chips', f'{i:04d}.png'))
+#         save_image(data['image'], os.path.join(data_root, 'chips', f'{i:04d}.png'))

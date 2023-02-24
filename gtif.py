@@ -62,7 +62,9 @@ def create_geotiff(data, output_file, extent, data_type = gdal.GDT_Int16):
         resx = (extent[2] - extent[0]) / ncols
         resy = (extent[3] - extent[1]) / nlines
         return [extent[0], resx, 0, extent[3] , 0, -resy]
-
+    
+    
+    
     grid_data.SetGeoTransform(getGeoTransform(extent, nlines, ncols))
 
     # Save the file
@@ -80,6 +82,8 @@ def create_geotiff(data, output_file, extent, data_type = gdal.GDT_Int16):
 
 def read_geotiff(filename, bandId):
     ds = gdal.Open(filename)
+    ulx, xres, xskew, uly, yskew, yres  = ds.GetGeoTransform()
+    extent = [ulx, xres, xskew, uly, yskew, yres]
     band = ds.GetRasterBand(bandId)
     arr = band.ReadAsArray()
-    return arr, ds
+    return arr, extent, ds
