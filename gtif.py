@@ -1,5 +1,7 @@
 from osgeo import gdal, osr, ogr # Python bindings for GDALa
 import numpy as np
+import os
+import matplotlib.pyplot as plt
 
 def create_geotiff(data, output_file, extent, data_type = gdal.GDT_Int16):
     
@@ -46,7 +48,7 @@ def create_geotiff(data, output_file, extent, data_type = gdal.GDT_Int16):
     # Create a temp grid
     #options = ['COMPRESS=JPEG', 'JPEG_QUALITY=80', 'TILED=YES']
     grid_data = driver.Create('grid_data', ncols, nlines, nbands, data_type)#, options)
-
+    
     # Write data for each bands
     for i in range(nbands):
         grid_data.GetRasterBand(i+1).WriteArray(data[:,:,i])
@@ -87,3 +89,66 @@ def read_geotiff(filename, bandId):
     band = ds.GetRasterBand(bandId)
     arr = band.ReadAsArray()
     return arr, extent, ds
+
+def normalize_chips(chips_root, chips_layer_names):
+    # normalize pixel values of chips per channel
+    chips_scaled = chips_root + '_scaled'
+    if not os.path.exists(chips_scaled):
+        os.makedirs(chips_scaled)
+    hist_path = chips_root + '_hist'
+    if not os.path.exists(hist_path):
+        os.makedirs(hist_path)
+
+    file_list = os.listdir(chips_root)
+
+    f = os.path.join(chips_root, file_list[0])
+
+    arr = np.load(f)
+
+    n_channels = arr.shape[0]
+
+
+    mean_std = np.zeros([n_channels,2])
+    n_bins=40
+    for i in range(n_channels):
+
+        plt.figure()
+        holder = []
+
+        for file in file_list:
+            f = os.path.join(chips_root, file)
+            arr = np.load(f)
+            holder.extend(arr[i,:,:].flatten())
+
+        plt.subplot(2,1,1)
+        plt.hist(holder, bins=n_bins)
+        plt.title(f'channel {chips_layer_names[i]} before scaling')
+
+        h_mean = np.mean(holder)
+        h_std = np.std(holder)
+        
+        print(f"Channel {chips_layer_names[i]} has mean {h_mean} and std {h_std}")
+        mean_std[i, :] = h_mean, h_std
+
+        h_scaled = (holder - h_mean)/h_std
+        plt.subplot(2,1,2)
+        plt.hist(h_scaled, bins=n_bins)
+        plt.title(f'channel {chips_layer_names[i]} after scaling')
+        plt.tight_layout()
+        plt.savefig(os.path.join(hist_path, f'channel_{chips_layer_names[i]}.png'))
+
+    # normalize each channel to zero mean, unit variance
+    for file in file_list:
+        with open(os.path.join(chips_root, file), 'rb') as f:
+            loaded = np.load(f)
+
+        scaled = np.zeros(loaded.shape)
+
+        for i in range(n_channels):
+            mean = mean_std[i, 0]
+            std = mean_std[i, 1]
+            scaled[i,:,:] = (loaded[i,:,:] - mean) / std
+
+
+        with open(os.path.join(chips_scaled, file), 'wb') as f:
+            np.save(f, scaled)

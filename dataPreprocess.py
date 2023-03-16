@@ -3,7 +3,12 @@ import pandas as pd
 
 from pyproj import Transformer
 
+    
 def crop_df_hds(df):
+    """
+    filter dataframe to keep only boreholes inside hds_cropped area
+    """
+    
     ind = df[df['latitude'] > 68.692].index
     ind = ind.union(df[df['latitude'] <= 68.4881].index)
     ind = ind.union(df[df['longitude'] < -133.89358284312502].index)
@@ -105,16 +110,56 @@ def filter_df_materials(df):
     df['material_ice'] = dm_materials['Ice']
     print('\'material_ice\' column generated')
 
-# def create_chips_geo90(df, fpath, output_path):
-#     for for index, row in df.iterrows():
-        
-#         lat_index_start = np.round((self.base_lat - lat) / pixel_len - self.chip_size/2).astype(int)
-#         lat_index_end = lat_index_start + self.chip_size
-        
-#         lng_index_start = np.round((lng - self.base_lng) / pixel_len - self.chip_size/2).astype(int)
-#         lng_index_end = lng_index_start + self.chip_size
-        
-#         image = self.preloaded[:, lat_index_start:lat_index_end,lng_index_start:lng_index_end]
-        
     
-#         save_image(data['image'], os.path.join(data_root, 'chips', f'{i:04d}.png'))
+def prep_label_columns(df):
+    
+    """
+    Prepare label columns: visible_ice, materials
+    """
+    #  Prepare visible_ice column of dataframe, and generate visible_ice_code column
+    df['visible_ice'].replace(['None'], 'No visible ice', regex=True, inplace=True)
+    print('visible_ice: \'None\' entries have been replaced by \'No visible ice\'')
+    
+    ordered_ice = ['No visible ice', 'Low', "Medium to high", 'High', 'Pure ice']
+    df['visible_ice'] = pd.Series(pd.Categorical(df['visible_ice'], categories=ordered_ice, ordered=True))
+    
+    print('visible_ice column entries has been ordered:')
+    print(df['visible_ice'].unique())
+    
+    df['visible_ice_code'] =  df['visible_ice'].cat.codes
+    print('with corresponding codes in visible_ice_code column:')
+    print(df['visible_ice_code'].unique())
+    
+    dm_visible_ice = pd.get_dummies(df.visible_ice)
+    df['visible_ice_binary'] = (~dm_visible_ice['No visible ice'].astype(bool)).astype(int)
+    print('visible_ice: binary column generated')
+    
+    #Prepare materials column of dataframe, and generate material_ice column with binary values indicating whether the material is ice
+    
+    df['materials'].replace(['ICE'], 'Ice', regex=True, inplace=True)
+    df['materials'].replace(['ice'], 'Ice', regex=True, inplace=True)
+    print('materials: \'ICE\' and \'ice\' entries has been standardized into \'Ice\'')
+    
+    dm_materials = pd.get_dummies(df.materials)
+    df['material_ice'] = dm_materials['Ice']
+    print('\'material_ice\' column generated')
+    
+    df['materials'] = pd.Series(pd.Categorical(df['materials']))
+    df['materials_code'] = df['materials'].cat.codes
+    print("materials has been categorized into codes in materials_code")
+    
+def prepare_df(bh_file_path, list_cols, label):
+    "ingest, prepare, and filter dataframe for specified label"
+    
+    df = pd.read_csv(bh_file_path, header=[0])
+    df['interval_length'] = df['bottom_of_interval'] - df['top_of_interval']
+    df.borehole = df.borehole.str.replace('//', '--')
+    project_df(df)
+    df_scaler, list_of_columns_normalized = normalize_df(df, list_cols)
+    prep_label_columns(df)
+    
+    df2 = df.dropna(subset=[label])
+    print(f'Null entries of {label} dropped')
+    
+    n_classes = df2[label].nunique()
+    return df2, n_classes
