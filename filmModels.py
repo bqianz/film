@@ -347,13 +347,13 @@ class mlp_film(torch.nn.Module):
 
         
 class mlp_pure(torch.nn.Module):
-        def __init__(self, input_size, output_size):
+        def __init__(self, meta_params, input_size, output_size):
             super(mlp_pure, self).__init__()
             self.input_size = input_size
             self.output_size = output_size
             
-            self.hidden_size = hidden_width
-            self.hidden_nblocks = hidden_nblocks
+            self.hidden_size = meta_params['hidden_width']
+            self.hidden_nblocks = meta_params['hidden_nblocks']
             
             self.fc1 = torch.nn.Linear(self.input_size, self.hidden_size)
             self.fc2 = torch.nn.Linear(self.hidden_size,self.hidden_size)
@@ -390,7 +390,7 @@ def train_mlp(meta_params, trainloader, testloader):
     
     
     input_size = list(full_dataset[0]['tab_params'].size())
-    surface_model = mlp_pure(input_size[0],output_size)
+    surface_model = mlp_pure(meta_params, input_size[0],output_size)
     
     surface_model.to(device)
     
@@ -404,7 +404,7 @@ def train_mlp(meta_params, trainloader, testloader):
         for i, data in enumerate(trainloader, 0): # loop over each sample
 
             # get the inputs; data is a list of [inputs, labels]
-            surface_data, labels = data['tab_params'].to(device), data[label_name].to(device)
+            surface_data, labels = data['tab_params'].to(device), data['label'].to(device)
 
             predicted = surface_model(surface_data)
             
@@ -428,7 +428,7 @@ def train_mlp(meta_params, trainloader, testloader):
         validation_loss_sum = 0.0
         for i, data in enumerate(testloader, 0): # loop over each sample
 
-            surface_data, labels = data['tab_params'].to(device), data[label_name].to(device)
+            surface_data, labels = data['tab_params'].to(device), data['label'].to(device)
 
             predicted = surface_model(surface_data)
             
@@ -445,8 +445,11 @@ def train_mlp(meta_params, trainloader, testloader):
         if print_epochs:
             print('epoch %2d: running loss: %.5f, validation loss: %.5f' %
                           (epoch + 1, running_loss, validation_loss))
-
-        torch.save(surface_model.state_dict(), os.path.join('mlp', 'epoch-{}.pt'.format(epoch+1)))
+        
+        model_path = r'models\mlp'
+        if not os.path.exists(model_path):
+            os.makedirs(model_path)
+        torch.save(surface_model.state_dict(), os.path.join(model_path, 'epoch-{}.pt'.format(epoch+1)))
     
     if print_epochs:
         print('Finished Training')
@@ -467,8 +470,10 @@ def test_mlp(meta_params, testloader, epoch_loss):
     
     input_size = list(full_dataset[0]['tab_params'].size())
     
-    surface_model = mlp_pure(input_size[0],output_size)
-    surface_model.load_state_dict(torch.load(os.path.join('mlp', 'epoch-{}.pt'.format(ind+1))))
+    surface_model = mlp_pure(meta_params, input_size[0],output_size)
+    
+    model_path = r'models\mlp'
+    surface_model.load_state_dict(torch.load(os.path.join(model_path, 'epoch-{}.pt'.format(ind+1))))
     
     surface_model.to(device)
     
@@ -483,10 +488,11 @@ def test_mlp(meta_params, testloader, epoch_loss):
         y_pred = []
         y_cert = []
         for i, data in enumerate(testloader, 0):
-            surface_data, labels = data['tab_params'].to(device), data[label_name].to(device)
+            surface_data, labels = data['tab_params'].to(device), data['label'].to(device)
 
             output = surface_model(surface_data)
             
+            sm = torch.nn.Softmax(dim=-1)
             output = sm(output)
             # print(output)
             

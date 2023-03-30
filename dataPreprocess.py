@@ -2,8 +2,17 @@ from sklearn.preprocessing import MinMaxScaler, StandardScaler
 import pandas as pd
 
 from pyproj import Transformer
+from osgeo import gdal, osr, ogr
 
-    
+def project_df(df):
+    """
+    Add epsg3413 x, y coordinates to dataframe, according to longitude latitude
+    """
+    # EPSG:3413
+    # WGS 84 / NSIDC Sea Ice Polar Stereographic North
+    transformer = Transformer.from_crs("epsg:4326", "epsg:3413")
+    df['proj_x'], df['proj_y'] = transformer.transform(df.latitude,df.longitude)
+
 def crop_df_hds(df):
     """
     filter dataframe to keep only boreholes inside hds_cropped area
@@ -16,13 +25,42 @@ def crop_df_hds(df):
     
     return df.drop(ind)
     
-def project_df(df):
-    # EPSG:3413
-    # WGS 84 / NSIDC Sea Ice Polar Stereographic North
-    transformer = Transformer.from_crs("epsg:4326", "epsg:3413")
-    df['proj_x'], df['proj_y'] = transformer.transform(df.latitude,df.longitude)
 
 
+
+def crop_hds_discard_chips(df):
+    # crops breohole areas to hds region, and discard areas where hds chips have too much invalid pixels
+    df.borehole = df.borehole.str.replace('//', '--')
+
+    file = r"C:\Users\mouju\Desktop\film\hds\geotiff_original\ldcorr_refine.tif"
+    ds = gdal.Open(file)
+    ulx, xres, xskew, uly, yskew, yres  = ds.GetGeoTransform()
+
+    band = ds.GetRasterBand(1)
+    arr = band.ReadAsArray()
+
+    df = crop_df_hds(df)
+    
+    df['borehole_group'] = df['borehole'].str.split('-').str[0]
+
+    df=df.query("borehole_group != '2.45'")
+
+    df=df.query("borehole_group != 'GSC3 '")
+
+    df=df.query("borehole_group != 'GSC4 '")
+
+    df=df.query("borehole != 'ENG.YARC03097-01--ITH-02'")
+    df=df.query("borehole != 'ENG.YARC03097-01--ITH-03'")
+
+    df=df.query("borehole != 'ENG.YARC03097-01--ITH-04'")
+
+    df=df.query("borehole != 'W14103137-CR18N'")
+    df=df.query("borehole != 'W14103137-CR18S'")
+    df=df.query("borehole != 'W14103137-CR21N'")
+    df=df.query("borehole != 'W14103137-CR21S'")
+    print(f'Number of dataframe rows: {len(df)}')
+    return df
+    
 def normalize_df(df, cols = ['latitude', 'longitude', 'depth', 'time'], scalerType = StandardScaler):
     """
     Normalized tabular data in specified columns of a dataframe
@@ -148,10 +186,9 @@ def prep_label_columns(df):
     df['materials_code'] = df['materials'].cat.codes
     print("materials has been categorized into codes in materials_code")
     
-def prepare_df(bh_file_path, list_cols, label):
-    "ingest, prepare, and filter dataframe for specified label"
+def prepare_df(df, list_cols, label):
+    # prepare, and filter dataframe for specified label
     
-    df = pd.read_csv(bh_file_path, header=[0])
     df['interval_length'] = df['bottom_of_interval'] - df['top_of_interval']
     df.borehole = df.borehole.str.replace('//', '--')
     project_df(df)
