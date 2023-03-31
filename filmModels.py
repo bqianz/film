@@ -1,12 +1,12 @@
 import torch
 import os
 import numpy as np
-from torch.utils.data import Dataset
-from torch.utils.data import DataLoader
+from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
 import torchvision.models as models
 import time
 
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, precision_recall_fscore_support
+from sklearn.model_selection import KFold
 
 class filmDataset(Dataset):
     def __init__(self, chips_root, df, tab_params, label, chip_size=64):
@@ -59,30 +59,89 @@ class filmDataset(Dataset):
         
         return {'image': image, 'tab_params': tabular_parameters, 'label': label_value}
 
-def split_data(full_dataset):
-    train_size = int(0.8 * len(full_dataset))
+    
+def iterate_kfold(meta_params, loaded_dataset):
+    
+    n_classes = meta_params['n_classes']
+    n_channels = meta_params['n_channels']
+    film = meta_params['film']
+    batch_size = meta_params['batch_size']
+    
+    max_iterations = meta_params['max_iterations'] # also the kfold value
+    kfold = KFold(n_splits=max_iterations, shuffle=True)
+    
+    results = np.zeros([max_iterations, n_classes*4 + 1])
+
+    # for it in range(max_iterations):
+    for it, (train_ids, valid_ids) in enumerate(kfold.split(loaded_dataset)):
+        print(f'FOLD {it}')
+        print('--------------------------------')
+        
+        train_subsampler = SubsetRandomSampler(train_ids)
+        valid_subsampler = SubsetRandomSampler(valid_ids)
+        
+        trainloader = DataLoader(loaded_dataset, batch_size=batch_size, sampler=train_subsampler)
+        testloader = DataLoader(loaded_dataset, batch_size=batch_size, sampler=valid_subsampler)
+        
+        start = time.time()
+        
+        if film:
+            epoch_loss = train_film(meta_params, trainloader, testloader)
+            acc, scores, gen_model, net_model = test_film(meta_params, testloader, epoch_loss)
+
+        else:
+            epoch_loss_mlp = train_mlp(meta_params, trainloader, testloader)
+            acc, scores = test_mlp(meta_params, testloader, epoch_loss_mlp)
+    
+        # scores = precision, recall, fscore, support
+        results[it, 0] = acc
+        
+        print(scores)
+        
+        for j, score in enumerate(scores):
+            start_ind = 1 + j*n_classes
+            results[it, start_ind: start_ind + n_classes] = score
+
+        end = time.time()
+
+        print('iteration {} elapsed time: {}, accuracy : {}'.format(it+1, end-start, acc))
+    
+    return results
+
+def split_data(full_dataset, seed, train_test_ratio, batchsize):
+    train_size = int(train_test_ratio * len(full_dataset))
     test_size = len(full_dataset) - train_size
 
     # batchsize can cause error when last leftover batchsize is 1, batchnorm cannot function on 1 sample data
-    batchsize = 20
     while(train_size % batchsize == 1):
         batchsize+=1
     print(f'Batch size {batchsize}')
-
-    train_data, test_data = torch.utils.data.random_split(full_dataset, [train_size, test_size]) #generator=torch.Generator().manual_seed(42)
-
+    
+    if seed < 0:
+        train_data, test_data = torch.utils.data.random_split(full_dataset, [train_size, test_size])
+        print(f'Train test split ratio {train_test_ratio} with generator random')
+    else:
+        train_data, test_data = torch.utils.data.random_split(full_dataset, [train_size, test_size], generator=torch.Generator().manual_seed(seed))
+        print(f'Train test split ratio {train_test_ratio} with generator seed {seed}')
+    
     trainloader = DataLoader(train_data, batch_size=batchsize, shuffle=True)
     testloader = DataLoader(test_data, batch_size=batchsize, shuffle=True)
     print(f'Data split into training size {train_size} and testing size {test_size}')
     
     return trainloader, testloader
 
-def iterate(meta_params, trainloader, testloader):
+def iterate(meta_params, loaded_dataset):
     
+        
     max_iterations = meta_params['max_iterations']
     n_classes = meta_params['n_classes']
     n_channels = meta_params['n_channels']
     film = meta_params['film']
+    
+    trainloader, testloader = split_data(loaded_dataset, meta_params['seed'], meta_params['train_test_ratio'], meta_params['batch_size'])
+    
+
+
     
     results = np.zeros([max_iterations, n_classes*4 + 1])
 
@@ -110,6 +169,14 @@ def iterate(meta_params, trainloader, testloader):
     
     return results
 
+def loss_mean(epoch_loss):
+    halfway = int(epoch_loss.shape[0]/2)
+    epoch_loss_mean = np.mean(epoch_loss[halfway:, :], axis = 0)
+    epoch_loss[:, 0] = epoch_loss[:, 0] / epoch_loss_mean[0]
+    epoch_loss[:, 1] = epoch_loss[:, 1] / epoch_loss_mean[1]
+    
+    return np.sum(epoch_loss, axis = 1)
+
 def test_film(meta_params, testloader, epoch_loss):
     
     device = meta_params['device']
@@ -121,7 +188,10 @@ def test_film(meta_params, testloader, epoch_loss):
     full_dataset = meta_params['full_dataset']
     
     # ------ select model ---------
-    ind = np.argmin(epoch_loss[:, 1])
+    
+    weighted_epoch_loss = loss_mean(epoch_loss)
+    ind = np.argmin(weighted_epoch_loss)
+    # ind = np.argmin(epoch_loss[:, 1])
     
     n_film_params = hidden_width * hidden_nblocks * 2
     
@@ -185,6 +255,13 @@ def test_film(meta_params, testloader, epoch_loss):
 #             pr = predicted.tolist()
 #             y_test.extend(lb)
 #             y_pred.extend(pr)
+    
+    n_classes = meta_params['n_classes']
+    if n_classes > 1:
+        for i in range(n_classes):
+            if (i not in y_test) and (i not in y_pred):
+                y_test.append(i)
+                y_pred.append(i)
     
     arr_accuracy = accuracy_score(y_test, y_pred)
     scores = precision_recall_fscore_support(y_test, y_pred, average=None, zero_division=0)
@@ -466,7 +543,9 @@ def test_mlp(meta_params, testloader, epoch_loss):
     full_dataset = meta_params['full_dataset']
     
     # ------ select model ---------
-    ind = np.argmin(epoch_loss[:, 1])
+    # ind = np.argmin(epoch_loss[:, 1])
+    weighted_epoch_loss = loss_mean(epoch_loss)
+    ind = np.argmin(weighted_epoch_loss)
     
     input_size = list(full_dataset[0]['tab_params'].size())
     
@@ -511,6 +590,14 @@ def test_mlp(meta_params, testloader, epoch_loss):
 
 #     with open("mlp-certainty/iteration_{}.txt".format(it), "wb") as fp:   #Pickling
 #         pickle.dump(y_cert, fp)
+    
+    n_classes = meta_params['n_classes']
+    if n_classes > 1:
+        for i in range(n_classes):
+            if (i not in y_test) and (i not in y_pred):
+                y_test.append(i)
+                y_pred.append(i)
+                
     arr_accuracy = accuracy_score(y_test, y_pred)
     scores = precision_recall_fscore_support(y_test, y_pred, average=None, zero_division=0)
     return arr_accuracy, scores
