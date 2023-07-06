@@ -8,6 +8,8 @@ import time
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, precision_recall_fscore_support
 from sklearn.model_selection import KFold
 
+from temperature_scaling import *
+
 class filmDataset(Dataset):
     def __init__(self, chips_root, df, tab_params, label, chip_size=64):
         
@@ -59,6 +61,29 @@ class filmDataset(Dataset):
         
         return {'image': image, 'tab_params': tabular_parameters, 'label': label_value}
 
+def split_data(full_dataset, seed, train_test_ratio, batchsize):
+    train_size = int(train_test_ratio * len(full_dataset))
+    test_size = len(full_dataset) - train_size
+
+    # batchsize can cause error when last leftover batchsize is 1, batchnorm cannot function on 1 sample data
+    while(train_size % batchsize == 1):
+        batchsize+=1
+    print(f'Batch size {batchsize}')
+    
+    if seed < 0:
+        train_data, test_data = torch.utils.data.random_split(full_dataset, [train_size, test_size])
+        print(f'Train test split ratio {train_test_ratio} with generator random')
+    else:
+        train_data, test_data = torch.utils.data.random_split(full_dataset, [train_size, test_size], \
+                                                              generator=torch.Generator().manual_seed(seed))
+        print(f'Train test split ratio {train_test_ratio} with generator seed {seed}')
+    
+    trainloader = DataLoader(train_data, batch_size=batchsize, shuffle=True)
+    testloader = DataLoader(test_data, batch_size=batchsize, shuffle=True)
+    print(f'Data split into training size {train_size} and testing size {test_size}')
+    
+    return trainloader, testloader
+
     
 def iterate_kfold(meta_params, loaded_dataset):
     
@@ -87,11 +112,11 @@ def iterate_kfold(meta_params, loaded_dataset):
         
         if film:
             epoch_loss = train_film(meta_params, trainloader, testloader)
-            acc, scores, gen_model, net_model = test_film(meta_params, testloader, epoch_loss)
+            acc, scores, gen_model, net_model, certainties = test_film(meta_params, testloader, trainloader, epoch_loss)
 
         else:
             epoch_loss_mlp = train_mlp(meta_params, trainloader, testloader)
-            acc, scores = test_mlp(meta_params, testloader, epoch_loss_mlp)
+            acc, scores, certainties = test_mlp(meta_params, testloader, trainloader, epoch_loss_mlp)
     
         # scores = precision, recall, fscore, support
         results[it, 0] = acc
@@ -106,29 +131,8 @@ def iterate_kfold(meta_params, loaded_dataset):
 
         print('iteration {} elapsed time: {}, accuracy : {}'.format(it+1, end-start, acc))
     
-    return results
+    return results, certainties
 
-def split_data(full_dataset, seed, train_test_ratio, batchsize):
-    train_size = int(train_test_ratio * len(full_dataset))
-    test_size = len(full_dataset) - train_size
-
-    # batchsize can cause error when last leftover batchsize is 1, batchnorm cannot function on 1 sample data
-    while(train_size % batchsize == 1):
-        batchsize+=1
-    print(f'Batch size {batchsize}')
-    
-    if seed < 0:
-        train_data, test_data = torch.utils.data.random_split(full_dataset, [train_size, test_size])
-        print(f'Train test split ratio {train_test_ratio} with generator random')
-    else:
-        train_data, test_data = torch.utils.data.random_split(full_dataset, [train_size, test_size], generator=torch.Generator().manual_seed(seed))
-        print(f'Train test split ratio {train_test_ratio} with generator seed {seed}')
-    
-    trainloader = DataLoader(train_data, batch_size=batchsize, shuffle=True)
-    testloader = DataLoader(test_data, batch_size=batchsize, shuffle=True)
-    print(f'Data split into training size {train_size} and testing size {test_size}')
-    
-    return trainloader, testloader
 
 def iterate(meta_params, loaded_dataset):
     
@@ -138,10 +142,8 @@ def iterate(meta_params, loaded_dataset):
     n_channels = meta_params['n_channels']
     film = meta_params['film']
     
-    trainloader, testloader = split_data(loaded_dataset, meta_params['seed'], meta_params['train_test_ratio'], meta_params['batch_size'])
-    
-
-
+    trainloader, testloader = split_data(loaded_dataset, meta_params['seed'], \
+                                         meta_params['train_test_ratio'], meta_params['batch_size'])
     
     results = np.zeros([max_iterations, n_classes*4 + 1])
 
@@ -150,11 +152,11 @@ def iterate(meta_params, loaded_dataset):
         
         if film:
             epoch_loss = train_film(meta_params, trainloader, testloader)
-            acc, scores, gen_model, net_model = test_film(meta_params, testloader, epoch_loss)
+            acc, scores, gen_model, net_model, certainties = test_film(meta_params, testloader, epoch_loss)
 
         else:
             epoch_loss_mlp = train_mlp(meta_params, trainloader, testloader)
-            acc, scores = test_mlp(meta_params, testloader, epoch_loss_mlp)
+            acc, scores, certainties = test_mlp(meta_params, testloader, epoch_loss_mlp)
     
         # scores = precision, recall, fscore, support
         results[it, 0] = acc
@@ -167,7 +169,7 @@ def iterate(meta_params, loaded_dataset):
 
         print('iteration {} elapsed time: {}, accuracy : {}'.format(it+1, end-start, acc))
     
-    return results
+    return results, certainties
 
 def loss_mean(epoch_loss):
     halfway = int(epoch_loss.shape[0]/2)
@@ -177,7 +179,7 @@ def loss_mean(epoch_loss):
     
     return np.sum(epoch_loss, axis = 1)
 
-def test_film(meta_params, testloader, epoch_loss):
+def test_film(meta_params, testloader, trainloader, epoch_loss):
     
     device = meta_params['device']
     hidden_width = meta_params['hidden_width']
@@ -215,12 +217,21 @@ def test_film(meta_params, testloader, epoch_loss):
     if print_model_epoch:
         print("epoch {} model selected".format(ind+1))
     
+    
+    scaled_net_model = ModelWithTemperatureFilm(net_model)
+    scaled_net_model.set_temperature(trainloader, gen_model)
+    model_filename = os.path.join(model_path, 'model_with_temperature.pth')
+    torch.save(scaled_net_model.state_dict(), model_filename)
+    
     # evaluate model on test set
     gen_model.eval()
     net_model.eval()
+    scaled_net_model.eval()
     with torch.no_grad():
         y_test = []
         y_pred = []
+        y_cert = []
+        y_cert_scaled = []
         for i, data in enumerate(testloader, 0):
             images, surface_data, labels = data['image'].to(device), data['tab_params'].to(device), data['label'].to(device)
 
@@ -238,18 +249,21 @@ def test_film(meta_params, testloader, epoch_loss):
             
             max_results = torch.max(output, dim= -1)
             predicted = max_results.indices
+            certainty = max_results.values
             #predicted = torch.round(output)
             # print(predicted.shape)
             
             y_test.extend(labels.tolist())
             y_pred.extend(predicted.tolist())
-            
-#             predicted = torch.squeeze(predicted)
-
-#             predicted = torch.round(predicted)
-#             # print(predicted.shape)
+            y_cert.extend(certainty.tolist())
             
             
+            # temperature scaling certainties
+            output = scaled_net_model(surface_data, gen_params)
+            output = sm(output)
+            max_results = torch.max(output, dim= -1)
+            certainty = max_results.values
+            y_cert_scaled.extend(certainty.tolist())
             
 #             lb = labels.tolist()
 #             pr = predicted.tolist()
@@ -262,10 +276,12 @@ def test_film(meta_params, testloader, epoch_loss):
             if (i not in y_test) and (i not in y_pred):
                 y_test.append(i)
                 y_pred.append(i)
+                y_cert.append(1.0)
+                y_cert_scaled.append(1.0)
     
     arr_accuracy = accuracy_score(y_test, y_pred)
     scores = precision_recall_fscore_support(y_test, y_pred, average=None, zero_division=0)
-    return arr_accuracy, scores, gen_model, net_model
+    return arr_accuracy, scores, gen_model, net_model, np.vstack((y_cert, y_cert_scaled))
 
 
 #     print(confusion_matrix(y_test,y_pred))
@@ -530,10 +546,10 @@ def train_mlp(meta_params, trainloader, testloader):
     
     if print_epochs:
         print('Finished Training')
-        
+    
     return epoch_loss
         
-def test_mlp(meta_params, testloader, epoch_loss):
+def test_mlp(meta_params, testloader, trainloader, epoch_loss):
     device = meta_params['device']
     hidden_width = meta_params['hidden_width']
     hidden_nblocks = meta_params['hidden_nblocks']
@@ -559,13 +575,21 @@ def test_mlp(meta_params, testloader, epoch_loss):
     if print_model_epoch:
         print("epoch {} model selected".format(ind+1))
     
+    scaled_model = ModelWithTemperature(surface_model)
+    scaled_model.set_temperature(trainloader)
+    model_filename = os.path.join(model_path, 'model_with_temperature.pth')
+    torch.save(scaled_model.state_dict(), model_filename)
+    # print('Temperature scaled model sved to %s' % model_filename)
+    
     # evaluate model on test set
     surface_model.eval()
+    scaled_model.eval()
 
     with torch.no_grad():
         y_test = []
         y_pred = []
         y_cert = []
+        y_cert_scaled = []
         for i, data in enumerate(testloader, 0):
             surface_data, labels = data['tab_params'].to(device), data['label'].to(device)
 
@@ -586,8 +610,13 @@ def test_mlp(meta_params, testloader, epoch_loss):
             y_pred.extend(predicted.tolist())
             y_cert.extend(certainty.tolist())
             
-
-
+            # temperature scaling certainties
+            output = scaled_model(surface_data)
+            output = sm(output)
+            max_results = torch.max(output, dim= -1)
+            certainty = max_results.values
+            y_cert_scaled.extend(certainty.tolist())
+            
 #     with open("mlp-certainty/iteration_{}.txt".format(it), "wb") as fp:   #Pickling
 #         pickle.dump(y_cert, fp)
     
@@ -597,7 +626,11 @@ def test_mlp(meta_params, testloader, epoch_loss):
             if (i not in y_test) and (i not in y_pred):
                 y_test.append(i)
                 y_pred.append(i)
+                y_cert.append(1.0)
+                y_cert_scaled.append(1.0)
                 
     arr_accuracy = accuracy_score(y_test, y_pred)
     scores = precision_recall_fscore_support(y_test, y_pred, average=None, zero_division=0)
-    return arr_accuracy, scores
+    
+    
+    return arr_accuracy, scores, np.vstack((y_cert, y_cert_scaled))

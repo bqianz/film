@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 
 def display_table(meta_params, scores):
     n_classes = meta_params['n_classes']
@@ -25,3 +26,18 @@ def display_results(meta_params, results):
     display_table(meta_params, std[1:])
     
     print("Accuracy mean: {}, std: {}".format(mean[0], std[0]))
+    
+def certainties_histogram(certainties):
+    cert_orig = certainties[0]
+    cert_scaled = certainties[1]
+    
+    plt.subplot(1,2,1)
+    plt.hist(cert_orig, bins=16) 
+    plt.title('Unscaled Certainties')
+    
+    plt.subplot(1,2,2)
+    plt.hist(cert_scaled, bins=16)
+    plt.title('Scaled Certainties')
+    
+    plt.show()
+    
