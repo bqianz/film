@@ -185,6 +185,11 @@ def prep_label_columns(df):
     df['materials'] = pd.Series(pd.Categorical(df['materials']))
     df['materials_code'] = df['materials'].cat.codes
     print("materials has been categorized into codes in materials_code")
+
+def scale_column(column):
+    scaler = StandardScaler()
+    scaler.fit(column)
+    return scaler.transform(column)
     
 def prepare_df(df, list_cols, label):
     # prepare, and filter dataframe for specified label
