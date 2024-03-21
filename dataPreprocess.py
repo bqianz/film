@@ -139,7 +139,18 @@ def filter_df_materials(df):
     """
     Prepare materials column of dataframe, and generate material_ice column with binary values indicating whether the material is ice
     """
+
+    df['materials'].replace(['Pure Ice'], 'Ice', regex=True, inplace=True)
     
+    df['materials'].replace(['Coarse till'], 'Till', regex=True, inplace=True)
+    df['materials'].replace(['till'], 'Till', regex=True, inplace=True)
+    df['materials'].replace(['Fine till'], 'Till', regex=True, inplace=True)
+    df['materials'].replace(['Fine Till'], 'Till', regex=True, inplace=True)
+    
+    df['materials'].replace(['Cobbles'], 'Gravel', regex=True, inplace=True)
+    df['materials'].replace(['Rock'], 'Gravel', regex=True, inplace=True)
+
+    # -------------
     df['materials'].replace(['ICE'], 'Ice', regex=True, inplace=True)
     df['materials'].replace(['ice'], 'Ice', regex=True, inplace=True)
     print('materials: \'ICE\' and \'ice\' entries has been standardized into \'Ice\'')

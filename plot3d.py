@@ -97,9 +97,9 @@ fig = plt.figure()
 ax = fig.add_subplot(projection='3d')
 p = ax.scatter(x, y, z, c=df2['visible_ice_code'], cmap=plt.cm.inferno, edgecolor='none', alpha=0.5, s=8)
 
-ax.set_xlabel('Longitude')
-ax.set_ylabel('Latitude')
-ax.set_zlabel('Depth')
+ax.set_xlabel('Longitude ($^\circ$)')
+ax.set_ylabel('Latitude ($^\circ$)')
+ax.set_zlabel('Depth (m)')
 
 # ax.set_title('Visible Ice Borehole Data')
 
